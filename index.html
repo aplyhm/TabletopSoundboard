@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Soundboard">
+<meta name="app-version" content="1.6">
 <title>Soundboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,11 +128,21 @@ dialog h2{margin-bottom:16px}
   opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:calc(100vw - 32px);z-index:30}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
+.update{display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:1240px;margin:12px max(20px,calc((100% - 1240px)/2)) 0;
+  padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;font-weight:600}
+.update span{flex:1 1 220px}
+.update[hidden]{display:none}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
+
+<div id="updateBar" class="update" role="status" hidden>
+  <span>A new version of the soundboard is available.</span>
+  <button id="updateNow" class="btn solid" type="button">Update now</button>
+  <button id="updateLater" class="btn" type="button">Later</button>
+</div>
 
 <header class="top">
   <h1>Soundboard</h1>
@@ -558,6 +569,37 @@ dlg.addEventListener("close",async()=>{
   await store.putItem(it);render();updateWake();
 });
 
+/* ---------- updates ---------- */
+const APP_VERSION=(document.querySelector('meta[name="app-version"]')||{}).content||"";
+let pendingVersion="",dismissedVersion="",checking=false;
+// If the last "Update now" reloaded an old cached copy, ask for the page under a fresh address.
+try{
+  const want=sessionStorage.getItem("soundboard:want");
+  if(want){sessionStorage.removeItem("soundboard:want");
+    if(want!==APP_VERSION&&!location.search.includes("v="+want))location.replace(location.pathname+"?v="+encodeURIComponent(want));}
+}catch(e){}
+if(APP_VERSION)$("#editNote").append(" Soundboard version "+APP_VERSION+".");
+async function checkForUpdate(){
+  if(checking||!APP_VERSION||!/^https?:$/.test(location.protocol)||navigator.onLine===false)return;
+  checking=true;
+  try{
+    const res=await fetch(location.href.split("#")[0],{cache:"reload"});
+    if(res.ok){
+      const m=(await res.text()).match(/<meta name="app-version" content="([^"]+)"/);
+      if(m&&m[1]!==APP_VERSION&&m[1]!==dismissedVersion){pendingVersion=m[1];$("#updateBar").hidden=false;}
+    }
+  }catch(e){}
+  checking=false;
+}
+$("#updateNow").addEventListener("click",()=>{
+  stopAll();
+  try{sessionStorage.setItem("soundboard:want",pendingVersion);}catch(e){}
+  location.reload();
+});
+$("#updateLater").addEventListener("click",()=>{dismissedVersion=pendingVersion;$("#updateBar").hidden=true;});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkForUpdate();});
+setInterval(checkForUpdate,15*60*1000);
+
 /* ---------- start ---------- */
 $("#startBtn").addEventListener("click",()=>{
   if(!ctx)return;
@@ -578,6 +620,7 @@ window.addEventListener("pageshow",e=>{if(e.persisted&&started)showResume();});
   items=(await store.allItems()).sort((a,b)=>a.order-b.order);
   render();
   await reloadAll();
+  setTimeout(checkForUpdate,3000);
 })();
 })();
 </script>
