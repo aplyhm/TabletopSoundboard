@@ -251,7 +251,7 @@ function initAudio(){
   if(ctx)return true;
   const AC=window.AudioContext||window.webkitAudioContext;
   if(!AC)return false;
-  ctx=new AC();
+  ctx=new AC();ctx.onstatechange=onState;
   const master=ctx.createGain();master.connect(ctx.destination);
   buses={master};
   for(const k of ["music","layer","shot"]){const g=ctx.createGain();g.connect(master);buses[k]=g;}
@@ -265,7 +265,38 @@ function applyVolumes(secs){
   ramp(buses.layer.gain,curve(settings.layer),secs);
   ramp(buses.shot.gain,curve(settings.shot),secs);
 }
-function ensureRunning(){if(ctx&&ctx.state!=="running"){ctx.resume().catch(()=>{});}}
+let started=false,gen=0,chkT=null,hiddenAt=0;
+function scheduleCheck(){clearTimeout(chkT);chkT=setTimeout(()=>{if(started&&ctx&&ctx.state!=="running"&&!document.hidden)showResume();},700);}
+function ensureRunning(){if(!ctx||ctx.state==="running")return;ctx.resume().catch(()=>{});if(started)scheduleCheck();}
+function onState(e){if(e&&e.target!==ctx)return;if(started&&ctx&&ctx.state!=="running"&&!document.hidden)scheduleCheck();}
+function showResume(){
+  if(!$("#gate").hidden)return;
+  $("#gateText").textContent="The iPad paused the sound. Tap Resume to carry on.";
+  $("#startBtn").textContent="Resume";
+  $("#gate").hidden=false;
+}
+// Start a fresh audio engine: the iPad can leave the old one silent after a pause.
+function rebuildAudio(){
+  gen++;
+  for(const id of [...rt.keys()])dispose(id);
+  currentMusic=null;
+  const old=ctx;ctx=null;buses=null;
+  if(old){old.onstatechange=null;try{if(old.state!=="closed")old.close().catch(()=>{});}catch(e){}}
+  initAudio();unlock();
+  render();updateWake();
+  reloadAll();
+}
+async function reloadAll(){
+  const g=gen;
+  for(const it of [...items]){
+    if(g!==gen)return;
+    if(rt.has(it.id))continue;
+    const rec=await store.getBlob(it.id);
+    if(g!==gen)return;
+    if(rt.has(it.id)||!byId(it.id))continue;
+    await prepare(it,rec);refresh();
+  }
+}
 function unlock(){
   try{if(navigator.audioSession)navigator.audioSession.type="playback";}catch(e){}
   ensureRunning();
@@ -293,8 +324,9 @@ function sniffType(buf,fallback){
 async function prepare(it,rec){
   if(!rec){rt.set(it.id,{error:true});return;}
   if(it.kind==="shot"){
-    try{const buffer=await decode(rec.buf.slice(0));rt.set(it.id,{buffer,voices:new Set()});}
-    catch(e){rt.set(it.id,{error:true});toast(`Couldn't read "${it.name}". This device may not support the file. MP3, M4A, WAV and FLAC usually work.`);}
+    const c=ctx;
+    try{const buffer=await decode(rec.buf.slice(0));if(c!==ctx)return;rt.set(it.id,{buffer,voices:new Set()});}
+    catch(e){if(c!==ctx)return;rt.set(it.id,{error:true});toast(`Couldn't read "${it.name}". This device may not support the file. MP3, M4A, WAV and FLAC usually work.`);}
     return;
   }
   const url=URL.createObjectURL(new Blob([rec.buf],{type:sniffType(rec.buf,rec.type)}));
@@ -505,7 +537,16 @@ dlg.addEventListener("close",async()=>{
 });
 
 /* ---------- start ---------- */
-$("#startBtn").addEventListener("click",()=>{if(!ctx)return;unlock();$("#gate").hidden=true;});
+$("#startBtn").addEventListener("click",()=>{
+  if(!ctx)return;
+  if(started)rebuildAudio();else{unlock();started=true;}
+  $("#gate").hidden=true;
+});
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden){hiddenAt=Date.now();return;}
+  if(started&&hiddenAt){hiddenAt=0;showResume();}
+});
+window.addEventListener("pageshow",e=>{if(e.persisted&&started)showResume();});
 
 (async function boot(){
   if(!initAudio()){$("#gateText").textContent="This browser can't play audio here. Open the page in Safari on your iPad.";$("#startBtn").hidden=true;return;}
@@ -514,7 +555,7 @@ $("#startBtn").addEventListener("click",()=>{if(!ctx)return;unlock();$("#gate").
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
   items=(await store.allItems()).sort((a,b)=>a.order-b.order);
   render();
-  for(const it of items){await prepare(it,await store.getBlob(it.id));refresh();}
+  await reloadAll();
 })();
 })();
 </script>
