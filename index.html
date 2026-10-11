@@ -87,7 +87,10 @@ h2{font-stretch:112%;font-weight:750;font-size:1.15rem;margin:0}
   overflow-wrap:anywhere;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
   transition:transform 60ms ease-out,box-shadow 60ms ease-out}
 .pad.down{transform:translateY(5px);box-shadow:0 1px 0 var(--pe)}
-.pad.live::after{content:"";position:absolute;inset:-6px;border-radius:21px;border:3px solid var(--ink);pointer-events:none}
+.pad .ring{position:absolute;left:-5px;top:-5px;overflow:visible;pointer-events:none;opacity:0;transition:opacity .2s}
+.pad.live .ring{opacity:1}
+.pad .ring rect{fill:none;stroke:var(--ink);stroke-width:3}
+.pad .ring .track{opacity:.18}
 .pad .state{position:absolute;top:10px;left:12px;font-size:.78rem;font-weight:600}
 
 .loading{opacity:.5}
@@ -386,7 +389,26 @@ function fireShot(id,btn){
   s.connect(g);g.connect(buses.shot);
   s.onended=()=>{r.voices.delete(s);try{g.disconnect();}catch(e){}if(!r.voices.size&&btn)btn.classList.remove("live");};
   r.voices.add(s);s.start();
-  if(btn){btn.classList.add("live","down");setTimeout(()=>btn.classList.remove("down"),130);}
+  if(btn){btn.classList.add("live","down");setTimeout(()=>btn.classList.remove("down"),130);startRing(btn,r.buffer.duration);}
+}
+// Outline around a pad that draws itself over the length of the sound.
+function ringSvg(){
+  const ns="http://www.w3.org/2000/svg";
+  const s=document.createElementNS(ns,"svg");s.setAttribute("class","ring");s.setAttribute("aria-hidden","true");
+  const a=document.createElementNS(ns,"rect");a.setAttribute("class","track");
+  const b=document.createElementNS(ns,"rect");b.setAttribute("class","prog");
+  s.append(a,b);return s;
+}
+function startRing(btn,dur){
+  const svg=btn.querySelector(".ring");if(!svg)return;
+  const w=btn.offsetWidth,h=btn.offsetHeight,W=w+7,H=h+7,rad=19.5;
+  svg.setAttribute("width",w+10);svg.setAttribute("height",h+10);
+  svg.querySelectorAll("rect").forEach(rc=>{rc.setAttribute("x",1.5);rc.setAttribute("y",1.5);rc.setAttribute("width",W);rc.setAttribute("height",H);rc.setAttribute("rx",rad);});
+  const P=2*(W+H)-8*rad+2*Math.PI*rad;
+  const p=svg.querySelector(".prog");
+  p.style.transition="none";p.style.strokeDasharray=P+" "+P;p.style.strokeDashoffset=P;
+  void p.getBoundingClientRect();
+  p.style.transition=`stroke-dashoffset ${dur}s linear`;p.style.strokeDashoffset=0;
 }
 function stopAll(){
   for(const [id,r] of rt){if(r.el&&r.playing)fadeStop(id,0.3);if(r.voices)r.voices.forEach(v=>{try{v.stop();}catch(e){}});}
@@ -427,7 +449,7 @@ function render(){
   if(!shots.length)pg.append(mk("div","empty","No one-shots yet. Add short clips like a horn, applause or a whoosh."));
   for(const it of shots){
     const b=mk("button","pad");b.type="button";b.dataset.id=it.id;paint(b,it);
-    b.append(mk("span","state"),mk("span","name",it.name));pg.append(b);
+    b.append(mk("span","state"),mk("span","name",it.name),ringSvg());pg.append(b);
   }
   refresh();
 }
