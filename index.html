@@ -168,7 +168,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
   </section>
 </main>
 
-<input id="filePick" type="file" accept="audio/*,.flac,audio/flac,audio/x-flac" multiple hidden>
+<input id="filePick" type="file" multiple hidden>
 
 <dialog id="editDlg" aria-labelledby="dlgTitle">
   <form method="dialog">
@@ -428,6 +428,8 @@ $("#filePick").addEventListener("change",async e=>{
   for(const file of files){
     try{
       const buf=await file.arrayBuffer();
+      const looksAudio=sniffType(buf,"?")!=="?"||(file.type||"").startsWith("audio/")||/\.(mp3|m4a|aac|wav|aif|aiff|caf|flac|ogg|opus)$/i.test(file.name);
+      if(!looksAudio){toast(`"${file.name}" isn't a sound file, so it was skipped.`);continue;}
       const rec={buf,type:sniffType(buf,file.type)};
       const it={id:newId(),kind,name:file.name.replace(/\.[^.]+$/,"")||"Sound",color:count%COLORS.length,vol:100,mode:"overlap",order:Date.now()+added};
       count++;
