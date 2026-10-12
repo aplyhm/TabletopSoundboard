@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Soundboard">
-<meta name="app-version" content="1.6">
+<meta name="app-version" content="1.7">
 <title>Soundboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -280,6 +280,7 @@ function applyVolumes(secs){
   ramp(buses.shot.gain,curve(settings.shot),secs);
 }
 let started=false,gen=0,chkT=null,hiddenAt=0;
+const resumePos=new Map(); // positions to restore after the audio engine restarts
 function scheduleCheck(){clearTimeout(chkT);chkT=setTimeout(()=>{if(started&&ctx&&ctx.state!=="running"&&!document.hidden)showResume();},700);}
 function ensureRunning(){if(!ctx||ctx.state==="running")return;ctx.resume().catch(()=>{});if(started)scheduleCheck();}
 function onState(e){if(e&&e.target!==ctx)return;if(started&&ctx&&ctx.state!=="running"&&!document.hidden)scheduleCheck();}
@@ -292,6 +293,7 @@ function showResume(){
 // Start a fresh audio engine: the iPad can leave the old one silent after a pause.
 function rebuildAudio(){
   gen++;
+  for(const [id,r] of rt){if(r.el&&r.el.currentTime>0)resumePos.set(id,r.el.currentTime);}
   for(const id of [...rt.keys()])dispose(id);
   currentMusic=null;
   const old=ctx;ctx=null;buses=null;
@@ -351,6 +353,8 @@ async function prepare(it,rec){
   el.addEventListener("timeupdate",()=>{if(it.kind!=="music"||!el.duration)return;
     const bar=document.querySelector(`.track[data-id="${it.id}"] .bar`);if(bar)bar.style.width=(el.currentTime/el.duration*100)+"%";});
   el.addEventListener("error",()=>{r.error=true;r.playing=false;refresh();toast(`Couldn't play "${it.name}". This device may not support the file. MP3, M4A, WAV and FLAC usually work.`);});
+  if(resumePos.has(it.id)){const t=resumePos.get(it.id);resumePos.delete(it.id);
+    el.addEventListener("loadedmetadata",()=>{try{el.currentTime=t;}catch(e){}refresh();},{once:true});}
   rt.set(it.id,r);
 }
 function dispose(id){
@@ -364,17 +368,17 @@ function dispose(id){
 function startStream(id,fade){
   const r=rt.get(id),it=byId(id);if(!r||!r.el||r.error)return false;
   clearTimeout(r.stopT);
-  if(r.el.paused){try{r.el.currentTime=0;}catch(e){}}
+  // Keep the remembered position: only Stop all sends a track back to the start.
   ramp(r.g.gain,itemGain(it),fade);
   r.playing=true;
   const p=r.el.play();
   if(p&&p.catch)p.catch(()=>{r.playing=false;if(currentMusic===id)currentMusic=null;refresh();toast("Playback was blocked. Tap the sound again.");});
   return true;
 }
-function fadeStop(id,fade){
+function fadeStop(id,fade,reset){
   const r=rt.get(id);if(!r||!r.el)return;
   ramp(r.g.gain,0,fade);r.playing=false;clearTimeout(r.stopT);
-  r.stopT=setTimeout(()=>{if(!r.playing)r.el.pause();},fade*1000+80);
+  r.stopT=setTimeout(()=>{if(!r.playing){r.el.pause();if(reset){try{r.el.currentTime=0;}catch(e){}refresh();}}},fade*1000+80);
 }
 function toggleMusic(id){
   ensureRunning();
@@ -422,7 +426,7 @@ function startRing(btn,dur){
   p.style.transition=`stroke-dashoffset ${dur}s linear`;p.style.strokeDashoffset=0;
 }
 function stopAll(){
-  for(const [id,r] of rt){if(r.el&&r.playing)fadeStop(id,0.3);if(r.voices)r.voices.forEach(v=>{try{v.stop();}catch(e){}});}
+  for(const [id,r] of rt){if(r.el){if(r.playing)fadeStop(id,0.3,true);else{try{r.el.currentTime=0;}catch(e){}}}if(r.voices)r.voices.forEach(v=>{try{v.stop();}catch(e){}});}
   currentMusic=null;refresh();updateWake();
 }
 function liveGain(it){const r=rt.get(it.id);if(r&&r.g&&r.playing)ramp(r.g.gain,itemGain(it),0.05);}
@@ -477,8 +481,8 @@ function refresh(){
     }else{
       const on=!!(r&&r.playing);
       b.setAttribute("aria-pressed",on?"true":"false");
-      if(st)st.textContent=r&&r.error?"Can't play":on?(it.kind==="music"?"Playing":"On"):"";
-      if(!on&&it.kind==="music"){const bar=b.querySelector(".bar");if(bar&&r&&r.el&&r.el.paused)bar.style.width="0";}
+      if(st)st.textContent=r&&r.error?"Can't play":on?(it.kind==="music"?"Playing":"On"):(r&&r.el&&r.el.currentTime>0.5?"Paused":"");
+      if(it.kind==="music"){const bar=b.querySelector(".bar");if(bar&&r&&r.el){const d=r.el.duration;bar.style.width=(d?r.el.currentTime/d*100:0)+"%";}}
     }
   });
 }
